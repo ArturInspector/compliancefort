@@ -24,7 +24,11 @@ module compliance_fort
     integer, parameter :: PRIME = 23  ! взял маленькое для тестов, потом поменяем
     integer, parameter :: GENERATOR = 5  ! это работает, не трогай
     
-    private :: Message, mod_pow, create_message_internal, verify_proof_internal
+    ! Public functions for Fortran code
+    public :: Message, PRIME, GENERATOR
+    public :: create_message, verify_proof, mod_pow, generate_public_key_fortran
+    
+    private :: create_message_internal, verify_proof_internal
     
 contains
 
@@ -84,6 +88,31 @@ contains
         
         pub_key = mod_pow(GENERATOR, secret_key, PRIME)
     end function generate_public_key
+    
+    ! Public Fortran function: Generate public key
+    function generate_public_key_fortran(secret_key) result(pub_key)
+        integer, intent(in) :: secret_key
+        integer :: pub_key
+        
+        pub_key = mod_pow(GENERATOR, secret_key, PRIME)
+    end function generate_public_key_fortran
+    
+    ! Public Fortran function: Create message with ZK proof
+    function create_message(id, data, secret_key, pub_key) result(msg)
+        integer, intent(in) :: id, data, secret_key, pub_key
+        type(Message) :: msg
+        
+        msg = create_message_internal(id, data, secret_key, pub_key)
+    end function create_message
+    
+    ! Public Fortran function: Verify ZK proof
+    function verify_proof(msg, pub_key) result(is_valid)
+        type(Message), intent(in) :: msg
+        integer, intent(in) :: pub_key
+        logical :: is_valid
+        
+        is_valid = verify_proof_internal(msg, pub_key)
+    end function verify_proof
     
     ! Internal: Create message with ZK proof
     function create_message_internal(id, data, secret_key, pub_key) result(msg)
