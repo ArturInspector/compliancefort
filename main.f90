@@ -12,16 +12,8 @@
 ! знания секретного ключа без его раскрытия
 
 program zk_queue
+    use compliance_fort
     implicit none
-    
-    ! Типы данных для нашей очереди
-    type :: Message
-        integer :: id              ! Уникальный номер сообщения
-        integer :: data            ! Данные (в реальности это может быть что угодно)
-        integer :: proof_r         ! Первая часть ZK-доказательства
-        integer :: proof_s         ! Вторая часть ZK-доказательства
-        integer :: public_key      ! Публичный ключ отправителя
-    end type Message
     
     type :: Queue
         type(Message), allocatable :: messages(:)
@@ -29,9 +21,7 @@ program zk_queue
         integer :: capacity        ! Максимальная вместимость
     end type Queue
     
-    ! Константы для криптографии (упрощенные, для демонстрации)
-    integer, parameter :: PRIME = 23        ! Простое число для модульной арифметики
-    integer, parameter :: GENERATOR = 5     ! Генератор группы
+    ! Константы для очереди
     integer, parameter :: MAX_QUEUE = 100   ! Максимальный размер очереди
     
     ! Переменные
@@ -48,8 +38,8 @@ program zk_queue
     print *, ''
     
     ! Генерируем секретный ключ (в реальности это должно быть случайным)
-    secret_key = 7
-    public_key = mod_pow(GENERATOR, secret_key, PRIME)
+    secret_key = 7  ! хардкод для демки, потом убрать
+    public_key = generate_public_key_fortran(secret_key)
     
     print *, 'Секретный ключ (известен только отправителю):', secret_key
     print *, 'Публичный ключ (все знают):', public_key
@@ -112,7 +102,7 @@ contains
         
         if (q%size >= q%capacity) then
             print *, 'ОШИБКА: Очередь переполнена!'
-            return
+            return  ! просто выходим, можно было бы расширить массив
         end if
         
         q%size = q%size + 1
@@ -134,6 +124,7 @@ contains
         msg = q%messages(1)
         
         ! Сдвигаем все сообщения влево
+        ! неэффективно для больших очередей, но работает
         do i = 1, q%size - 1
             q%messages(i) = q%messages(i + 1)
         end do
@@ -141,75 +132,6 @@ contains
         q%size = q%size - 1
     end function dequeue
     
-    ! Создание сообщения с ZK-доказательством
-    ! Используем упрощенный протокол Schnorr
-    function create_message(id, data, secret_key, pub_key) result(msg)
-        integer, intent(in) :: id, data, secret_key, pub_key
-        type(Message) :: msg
-        integer :: r, k, challenge, s
-        
-        ! Генерируем случайное число k (в реальности должно быть криптографически стойким)
-        k = mod(id * 3 + 7, PRIME - 1) + 1  ! Упрощенная генерация
-        
-        ! Вычисляем первую часть доказательства: r = g^k mod p
-        r = mod_pow(GENERATOR, k, PRIME)
-        
-        ! Вычисляем challenge (в реальности это хеш от r и данных)
-        challenge = mod(r + data, PRIME)
-        
-        ! Вычисляем вторую часть доказательства: s = k - challenge * secret_key mod (p-1)
-        s = mod(k - challenge * secret_key, PRIME - 1)
-        if (s < 0) s = s + (PRIME - 1)
-        
-        msg%id = id
-        msg%data = data
-        msg%proof_r = r
-        msg%proof_s = s
-        msg%public_key = pub_key
-    end function create_message
-    
-    ! Верификация ZK-доказательства
-    ! Проверяем, что отправитель знает секретный ключ, не раскрывая его
-    function verify_proof(msg, pub_key) result(is_valid)
-        type(Message), intent(in) :: msg
-        integer, intent(in) :: pub_key
-        logical :: is_valid
-        integer :: challenge, left_side, right_side
-        
-        ! Вычисляем challenge так же, как при создании
-        challenge = mod(msg%proof_r + msg%data, PRIME)
-        
-        ! Проверяем: g^s * pub_key^challenge должно равняться r
-        ! Это математическая проверка доказательства
-        left_side = mod(mod_pow(GENERATOR, msg%proof_s, PRIME) * &
-                        mod_pow(pub_key, challenge, PRIME), PRIME)
-        right_side = msg%proof_r
-        
-        is_valid = (left_side == right_side)
-    end function verify_proof
-    
-    ! Быстрое возведение в степень по модулю
-    ! Это важно для криптографии - работает быстро даже с большими числами
-    function mod_pow(base, exp, modulus) result(result)
-        integer, intent(in) :: base, exp, modulus
-        integer :: result
-        integer :: b, e, res
-        
-        b = mod(base, modulus)
-        e = exp
-        res = 1
-        
-        ! Алгоритм быстрого возведения в степень
-        do while (e > 0)
-            if (mod(e, 2) == 1) then
-                res = mod(res * b, modulus)
-            end if
-            b = mod(b * b, modulus)
-            e = e / 2
-        end do
-        
-        result = res
-    end function mod_pow
 
 end program zk_queue
 
