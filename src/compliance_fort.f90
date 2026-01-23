@@ -21,8 +21,10 @@ module compliance_fort
     end type Message
     
     ! Cryptographic constants
-    integer, parameter :: PRIME = 23  ! взял маленькое для тестов, потом поменяем
-    integer, parameter :: GENERATOR = 5  ! это работает, не трогай
+    ! Демо-режим: маленькое простое число для наглядности
+    ! В продакшене: использовать 256+ бит
+    integer, parameter :: PRIME = 23
+    integer, parameter :: GENERATOR = 5
     
     ! Public functions for Fortran code
     public :: Message, PRIME, GENERATOR
@@ -160,6 +162,7 @@ contains
     end function verify_proof_internal
     
     ! Fast modular exponentiation (binary exponentiation)
+    ! O(log n) - ключ к производительности
     function mod_pow(base, exp, modulus) result(result)
         integer, intent(in) :: base, exp, modulus
         integer :: result
@@ -169,17 +172,60 @@ contains
         e = exp
         res = 1
         
-        ! бинарное возведение в степень, стандартный алгоритм
         do while (e > 0)
             if (mod(e, 2) == 1) then
                 res = mod(res * b, modulus)
             end if
             b = mod(b * b, modulus)
-            e = e / 2  ! целочисленное деление
+            e = e / 2
         end do
         
         result = res
     end function mod_pow
+
+    ! ================================================================
+    ! BATCH VERIFICATION - главная фича
+    ! Верификация массива доказательств за один вызов FFI
+    ! Минимизирует overhead вызовов Python->Fortran
+    ! ================================================================
+    
+    ! Batch verify: проверяет массив сообщений, возвращает количество валидных
+    subroutine batch_verify(messages, count, pub_key, valid_count, results) &
+            bind(C, name='batch_verify')
+        integer(C_INT), value, intent(in) :: count, pub_key
+        type(CMessage), intent(in) :: messages(count)
+        integer(C_INT), intent(out) :: valid_count
+        logical(C_BOOL), intent(out) :: results(count)
+        
+        integer :: i
+        type(Message) :: f_msg
+        
+        valid_count = 0
+        
+        ! Цикл по всем сообщениям
+        ! В продакшене можно добавить OpenMP: !$OMP PARALLEL DO
+        do i = 1, count
+            f_msg = c_to_fortran(messages(i))
+            results(i) = verify_proof_internal(f_msg, pub_key)
+            if (results(i)) valid_count = valid_count + 1
+        end do
+    end subroutine batch_verify
+    
+    ! Batch create: создаёт массив доказательств
+    subroutine batch_create(ids, data_arr, count, secret_key, pub_key, messages) &
+            bind(C, name='batch_create')
+        integer(C_INT), value, intent(in) :: count, secret_key, pub_key
+        integer(C_INT), intent(in) :: ids(count), data_arr(count)
+        type(CMessage), intent(out) :: messages(count)
+        
+        integer :: i
+        type(Message) :: f_msg
+        
+        do i = 1, count
+            f_msg = create_message_internal(ids(i), data_arr(i), secret_key, pub_key)
+            messages(i) = fortran_to_c(f_msg)
+        end do
+    end subroutine batch_create
 
 end module compliance_fort
 

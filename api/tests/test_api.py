@@ -93,14 +93,71 @@ def test_verify_invalid_proof():
         json={
             "id": 1,
             "data": 100,
-            "proof_r": 999,  # Invalid
-            "proof_s": 888,  # Invalid
+            "proof_r": 999,
+            "proof_s": 888,
             "public_key": 17
         }
     )
     assert response.status_code == 200
     data = response.json()
-    # Should be invalid (unless in mock mode)
     assert "valid" in data
 
+
+def test_batch_create():
+    """Test batch proof creation"""
+    response = client.post(
+        "/api/v1/batch/create",
+        json={
+            "secret_key": 7,
+            "items": [
+                {"id": 1, "data": 10},
+                {"id": 2, "data": 20},
+                {"id": 3, "data": 30}
+            ]
+        }
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["proofs"]) == 3
+    assert "elapsed_ms" in data
+
+
+def test_batch_verify():
+    """Test batch proof verification"""
+    # Create proofs first
+    create_resp = client.post(
+        "/api/v1/batch/create",
+        json={
+            "secret_key": 7,
+            "items": [
+                {"id": 1, "data": 10},
+                {"id": 2, "data": 20}
+            ]
+        }
+    )
+    proofs = create_resp.json()["proofs"]
+    pub_key = proofs[0]["public_key"]
+    
+    # Verify batch
+    verify_resp = client.post(
+        "/api/v1/batch/verify",
+        json={
+            "public_key": pub_key,
+            "proofs": [
+                {
+                    "id": p["id"],
+                    "data": p["data"],
+                    "proof_r": p["proof_r"],
+                    "proof_s": p["proof_s"],
+                    "public_key": p["public_key"]
+                }
+                for p in proofs
+            ]
+        }
+    )
+    assert verify_resp.status_code == 200
+    data = verify_resp.json()
+    assert data["total"] == 2
+    assert data["valid_count"] == 2
+    assert "elapsed_ms" in data
 
