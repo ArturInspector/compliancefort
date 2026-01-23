@@ -12,8 +12,13 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 import ctypes
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import time
+
+
+def utcnow() -> str:
+    """UTC timestamp ISO format"""
+    return datetime.now(timezone.utc).isoformat()
 
 # Load Fortran library
 LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'libcompliance_fort.so')
@@ -44,7 +49,8 @@ if lib:
     lib.create_zk_proof.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     lib.create_zk_proof.restype = CMessage
     
-    lib.verify_zk_proof.argtypes = [CMessage, ctypes.c_int]
+    # Fortran bind(C) передаёт структуры по ссылке
+    lib.verify_zk_proof.argtypes = [ctypes.POINTER(CMessage), ctypes.c_int]
     lib.verify_zk_proof.restype = ctypes.c_bool
     
     lib.generate_public_key.argtypes = [ctypes.c_int]
@@ -52,21 +58,21 @@ if lib:
     
     # Batch functions
     lib.batch_verify.argtypes = [
-        ctypes.POINTER(CMessage),  # messages array
-        ctypes.c_int,              # count
-        ctypes.c_int,              # pub_key
-        ctypes.POINTER(ctypes.c_int),  # valid_count (out)
-        ctypes.POINTER(ctypes.c_bool)  # results array (out)
+        ctypes.POINTER(CMessage),
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_bool)
     ]
     lib.batch_verify.restype = None
     
     lib.batch_create.argtypes = [
-        ctypes.POINTER(ctypes.c_int),  # ids
-        ctypes.POINTER(ctypes.c_int),  # data
-        ctypes.c_int,                   # count
-        ctypes.c_int,                   # secret_key
-        ctypes.c_int,                   # pub_key
-        ctypes.POINTER(CMessage)        # messages (out)
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.POINTER(CMessage)
     ]
     lib.batch_create.restype = None
 
@@ -160,10 +166,9 @@ def create_zk_proof(id: int, data: int, secret_key: int, pub_key: Optional[int] 
 def verify_zk_proof(msg: CMessage, pub_key: int) -> bool:
     """Verify ZK proof using Fortran library"""
     if lib is None:
-        # Mock mode - always return True for development
         return True
     
-    return lib.verify_zk_proof(msg, pub_key)
+    return lib.verify_zk_proof(ctypes.byref(msg), pub_key)
 
 # API Routes
 @app.get("/", tags=["Health"])
@@ -180,7 +185,7 @@ async def root():
 async def health_check():
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow(),
         "library_loaded": lib is not None  # проверяем что фортран загрузился
     }
 
@@ -206,7 +211,7 @@ async def create_proof(request: MessageRequest):
             proof_r=c_msg.proof_r,
             proof_s=c_msg.proof_s,
             public_key=c_msg.public_key,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=utcnow()
         )
     except Exception as e:
         raise HTTPException(
@@ -236,7 +241,7 @@ async def verify_proof(request: VerifyRequest):
         return VerifyResponse(
             valid=is_valid,
             message="Proof is valid" if is_valid else "Proof is invalid",
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=utcnow()
         )
     except Exception as e:
         raise HTTPException(
@@ -255,7 +260,7 @@ async def generate_public_key(request: PublicKeyRequest):
         
         return PublicKeyResponse(
             public_key=pub_key,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=utcnow()
         )
     except Exception as e:
         raise HTTPException(
@@ -283,7 +288,7 @@ async def batch_verify_proofs(request: BatchVerifyRequest):
         return BatchVerifyResponse(
             total=0, valid_count=0, invalid_count=0,
             results=[], elapsed_ms=0,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=utcnow()
         )
     
     if lib is None:
@@ -321,7 +326,7 @@ async def batch_verify_proofs(request: BatchVerifyRequest):
         invalid_count=count - valid_count,
         results=results,
         elapsed_ms=round(elapsed, 3),
-        timestamp=datetime.utcnow().isoformat()
+        timestamp=utcnow()
     )
 
 @app.post("/api/v1/batch/create", response_model=BatchCreateResponse, tags=["Batch"])
@@ -335,7 +340,7 @@ async def batch_create_proofs(request: BatchCreateRequest):
     if count == 0:
         return BatchCreateResponse(
             proofs=[], elapsed_ms=0,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=utcnow()
         )
     
     if lib is None:
@@ -344,7 +349,7 @@ async def batch_create_proofs(request: BatchCreateRequest):
             MessageResponse(
                 id=item['id'], data=item['data'],
                 proof_r=123, proof_s=456, public_key=17,
-                timestamp=datetime.utcnow().isoformat()
+                timestamp=utcnow()
             )
             for item in request.items
         ]
@@ -360,7 +365,7 @@ async def batch_create_proofs(request: BatchCreateRequest):
         
         lib.batch_create(ids, data_arr, count, request.secret_key, pub_key, messages)
         
-        now = datetime.utcnow().isoformat()
+        now = utcnow()
         proofs = [
             MessageResponse(
                 id=m.id, data=m.data,
@@ -375,7 +380,7 @@ async def batch_create_proofs(request: BatchCreateRequest):
     return BatchCreateResponse(
         proofs=proofs,
         elapsed_ms=round(elapsed, 3),
-        timestamp=datetime.utcnow().isoformat()
+        timestamp=utcnow()
     )
 
 if __name__ == "__main__":
